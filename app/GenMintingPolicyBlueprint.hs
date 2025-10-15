@@ -24,7 +24,9 @@ import Data.Set qualified as Set
 import PlutusLedgerApi.Common (serialiseCompiledCode)
 import PlutusTx.Blueprint
 import System.Environment (getArgs)
+import PlutusLedgerApi.V1.Address (PubKeyHash) -- Considered a placeholder type import
 
+-- | Define your contract blueprint
 myContractBlueprint :: ContractBlueprint
 myContractBlueprint =
   MkContractBlueprint
@@ -34,6 +36,7 @@ myContractBlueprint =
     , contractDefinitions = deriveDefinitions @[AuctionMintingParams, ()]
     }
 
+-- | Metadata for the contract
 myPreamble :: Preamble
 myPreamble =
   MkPreamble
@@ -44,6 +47,11 @@ myPreamble =
     , preambleLicense = Just "MIT"
     }
 
+-- | Replace this with actual logic for fetching or generating a seller PubKeyHash
+sellerPubKeyHash :: PubKeyHash
+sellerPubKeyHash = error "TODO: Replace with actual seller public key hash"
+
+-- | Blueprint for your validator
 myValidator :: ValidatorBlueprint referencedTypes
 myValidator =
   MkValidatorBlueprint
@@ -59,23 +67,27 @@ myValidator =
         ]
     , validatorRedeemer =
         MkArgumentBlueprint
-          { argumentTitle = Just "Redeemer for the minting policy"
-          , argumentDescription = Just "The minting policy does not use a redeemer, hence ()"
-          , argumentPurpose = Set.fromList [Mint]
+          { argumentTitle = Just "Redeemer"
+          , argumentDescription = Just "The minting policy does not use a redeemer, so this is unit ()"
+          , argumentPurpose = Set.singleton Mint
           , argumentSchema = definitionRef @()
           }
     , validatorDatum = Nothing
-    , validatorCompiled = do 
-        let script = auctionMintingPolicyScript (error "Replace with seller public key hash")
-        let code = Short.fromShort (serialiseCompiledCode script) 
-        Just (compiledValidator PlutusV2 code)
+    , validatorCompiled =
+        let script = auctionMintingPolicyScript sellerPubKeyHash
+            code = Short.fromShort (serialiseCompiledCode script)
+         in Just (compiledValidator PlutusV2 code)
     }
 
+-- | Write the blueprint to the specified file
 writeBlueprintToFile :: FilePath -> IO ()
 writeBlueprintToFile path = writeBlueprint path myContractBlueprint
 
+-- | Main entry point: expects exactly one argument (output path)
 main :: IO ()
-main =
-  getArgs >>= \case
-    [arg] -> writeBlueprintToFile arg
-    args -> fail $ "Expects one argument, got " <> show (length args)
+main = getArgs >>= \case
+  [arg] -> writeBlueprintToFile arg
+  args -> do
+    putStrLn "Usage: auction-blueprint <output-file>"
+    putStrLn $ "Expected 1 argument, but got " <> show (length args) <> ": " <> show args
+    fail "Invalid number of arguments"
