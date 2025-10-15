@@ -1,14 +1,14 @@
-{-# LANGUAGE DataKinds                  #-}
-{-# LANGUAGE DerivingStrategies         #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE ImportQualifiedPost        #-}
-{-# LANGUAGE MultiParamTypeClasses      #-}
-{-# LANGUAGE OverloadedStrings          #-}
-{-# LANGUAGE PatternSynonyms            #-}
-{-# LANGUAGE ScopedTypeVariables        #-}
-{-# LANGUAGE Strict                     #-}
-{-# LANGUAGE TemplateHaskell            #-}
-{-# LANGUAGE ViewPatterns               #-}
+{-# LANGUAGE ImportQualifiedPost #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE Strict #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE ViewPatterns #-}
 {-# OPTIONS_GHC -fno-full-laziness #-}
 {-# OPTIONS_GHC -fno-ignore-interface-pragmas #-}
 {-# OPTIONS_GHC -fno-omit-interface-pragmas #-}
@@ -23,47 +23,63 @@ module AuctionMintingPolicy where
 
 import PlutusCore.Version (plcVersion100)
 import PlutusLedgerApi.V1.Value (flattenValue)
-import PlutusLedgerApi.V2 (PubKeyHash, ScriptContext (..), TxInfo (..))
+import PlutusLedgerApi.V2 (PubKeyHash, ScriptContext(..), TxInfo(..))
 import PlutusLedgerApi.V2.Contexts (ownCurrencySymbol, txSignedBy)
 import PlutusTx
 import PlutusTx.Prelude qualified as PlutusTx
 
--- BLOCK1
-type AuctionMintingParams = PubKeyHash
+--------------------------------------------------------------------------------
+-- | Types
+--------------------------------------------------------------------------------
+
+type AuctionMintingParams   = PubKeyHash
 type AuctionMintingRedeemer = ()
+
+--------------------------------------------------------------------------------
+-- | Typed minting policy
+--------------------------------------------------------------------------------
 
 {-# INLINEABLE auctionTypedMintingPolicy #-}
 auctionTypedMintingPolicy ::
-  AuctionMintingParams ->
-  AuctionMintingRedeemer ->
-  ScriptContext ->
+  AuctionMintingParams ->             -- ^ The required PubKeyHash (e.g. owner's)
+  AuctionMintingRedeemer ->          -- ^ Unused redeemer
+  ScriptContext ->                   -- ^ Transaction context
   Bool
-auctionTypedMintingPolicy pkh _redeemer ctx =
-  txSignedBy txInfo pkh PlutusTx.&& mintedExactlyOneToken
+auctionTypedMintingPolicy pkh _ ctx =
+  txSignedBy info pkh PlutusTx.&& mintedExactlyOneToken
   where
-    txInfo = scriptContextTxInfo ctx
-    mintedExactlyOneToken = case flattenValue (txInfoMint txInfo) of
-      [(currencySymbol, _tokenName, quantity)] ->
-        currencySymbol PlutusTx.== ownCurrencySymbol ctx PlutusTx.&& quantity PlutusTx.== 1
-      _ -> False
--- BLOCK2
+    info = scriptContextTxInfo ctx
 
+    -- | Ensure exactly one token is minted with the expected currency symbol
+    mintedExactlyOneToken = case flattenValue (txInfoMint info) of
+      [(cs, _tn, q)] ->
+        cs PlutusTx.== ownCurrencySymbol ctx PlutusTx.&& q PlutusTx.== 1
+      _ -> False
+
+--------------------------------------------------------------------------------
+-- | Untyped wrapper for the minting policy
+--------------------------------------------------------------------------------
+
+{-# INLINEABLE auctionUntypedMintingPolicy #-}
 auctionUntypedMintingPolicy ::
-  AuctionMintingParams ->
-  BuiltinData ->
-  BuiltinData ->
+  AuctionMintingParams ->          -- ^ Parameters (PubKeyHash)
+  BuiltinData ->                   -- ^ Redeemer (ignored here)
+  BuiltinData ->                   -- ^ ScriptContext
   PlutusTx.BuiltinUnit
 auctionUntypedMintingPolicy pkh redeemer ctx =
-  PlutusTx.check
-    ( auctionTypedMintingPolicy
-        pkh
-        (PlutusTx.unsafeFromBuiltinData redeemer)
-        (PlutusTx.unsafeFromBuiltinData ctx)
-    )
+  PlutusTx.check $
+    auctionTypedMintingPolicy
+      pkh
+      (PlutusTx.unsafeFromBuiltinData redeemer)
+      (PlutusTx.unsafeFromBuiltinData ctx)
+
+--------------------------------------------------------------------------------
+-- | Compiled minting policy
+--------------------------------------------------------------------------------
 
 auctionMintingPolicyScript ::
   AuctionMintingParams ->
   CompiledCode (BuiltinData -> BuiltinData -> PlutusTx.BuiltinUnit)
 auctionMintingPolicyScript pkh =
-  $$(PlutusTx.compile [||auctionUntypedMintingPolicy||])
+  $$(PlutusTx.compile [|| \pkh' -> auctionUntypedMintingPolicy pkh' ||])
     `PlutusTx.unsafeApplyCode` PlutusTx.liftCode plcVersion100 pkh
